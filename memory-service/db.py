@@ -1,8 +1,7 @@
 import sqlite3
-import sqlite_vec
 import struct
+import numpy as np
 from pathlib import Path
-from datetime import datetime
 from typing import Optional
 import logging
 
@@ -12,15 +11,17 @@ DB_PATH = Path("/app/data/memory.db")
 EMBEDDING_DIM = 384
 
 
-def serialize_float32(vector: list[float]) -> bytes:
+def serialize_embedding(vector: list[float]) -> bytes:
     return struct.pack(f"{len(vector)}f", *vector)
+
+
+def deserialize_embedding(data: bytes) -> np.ndarray:
+    count = len(data) // 4
+    return np.array(struct.unpack(f"{count}f", data), dtype=np.float32)
 
 
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-    conn.enable_load_extension(True)
-    sqlite_vec.load(conn)
-    conn.enable_load_extension(False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -38,7 +39,8 @@ def init_db() -> None:
             timestamp TEXT NOT NULL,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
-            file_path TEXT NOT NULL
+            file_path TEXT NOT NULL,
+            embedding BLOB
         )
     """)
 
@@ -63,14 +65,6 @@ def init_db() -> None:
             content,
             content_rowid='rowid',
             tokenize='porter unicode61'
-        )
-    """)
-
-    cursor.execute(f"""
-        CREATE VIRTUAL TABLE IF NOT EXISTS conversations_vec
-        USING vec0(
-            id TEXT PRIMARY KEY,
-            embedding float[{EMBEDDING_DIM}]
         )
     """)
 
@@ -103,10 +97,10 @@ def insert_conversation(
     cursor.execute(
         """
         INSERT OR REPLACE INTO conversations
-        (id, session_id, project_path, timestamp, role, content, file_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (id, session_id, project_path, timestamp, role, content, file_path, embedding)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (id, session_id, project_path, timestamp, role, content, file_path),
+        (id, session_id, project_path, timestamp, role, content, file_path, serialize_embedding(embedding)),
     )
 
     cursor.execute(
@@ -118,14 +112,6 @@ def insert_conversation(
         )
         """,
         (id, content),
-    )
-
-    cursor.execute(
-        """
-        INSERT OR REPLACE INTO conversations_vec (id, embedding)
-        VALUES (?, ?)
-        """,
-        (id, serialize_float32(embedding)),
     )
 
 
@@ -147,22 +133,41 @@ def fts_search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[di
 
 
 def vec_search(
-    conn: sqlite3.Connection, embedding: list[float], limit: int = 20
+    conn: sqlite3.Connection, query_embedding: list[float], limit: int = 20
 ) -> list[dict]:
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT v.id, v.distance, c.session_id, c.project_path, c.timestamp,
-               c.role, c.content
-        FROM conversations_vec v
-        JOIN conversations c ON c.id = v.id
-        WHERE embedding MATCH ?
-        ORDER BY distance
-        LIMIT ?
-        """,
-        (serialize_float32(embedding), limit),
+        SELECT id, session_id, project_path, timestamp, role, content, embedding
+        FROM conversations
+        WHERE embedding IS NOT NULL
+        """
     )
-    return [dict(row) for row in cursor.fetchall()]
+    rows = cursor.fetchall()
+
+    if not rows:
+        return []
+
+    query_vec = np.array(query_embedding, dtype=np.float32)
+    query_vec = query_vec / np.linalg.norm(query_vec)
+
+    results = []
+    for row in rows:
+        doc_vec = deserialize_embedding(row["embedding"])
+        doc_vec = doc_vec / np.linalg.norm(doc_vec)
+        similarity = np.dot(query_vec, doc_vec)
+        results.append({
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "project_path": row["project_path"],
+            "timestamp": row["timestamp"],
+            "role": row["role"],
+            "content": row["content"],
+            "distance": 1 - similarity,
+        })
+
+    results.sort(key=lambda x: x["distance"])
+    return results[:limit]
 
 
 def get_session_context(
