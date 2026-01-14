@@ -1,0 +1,16 @@
+.env
+*.log
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+data/
+*.db
+*.db-journal
+models/
+.DS_Store

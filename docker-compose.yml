@@ -1,0 +1,24 @@
+services:
+  memory:
+    build:
+      context: ./memory-service
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.0-flash-lite-001}
+    volumes:
+      - ${HOME}/.claude/projects:/claude-archives:ro
+      - memory-data:/app/data
+      - embedding-models:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  memory-data:
+  embedding-models:
