@@ -1,150 +1,168 @@
 # Claude Memory Skill
 
-A self-hosted service that enables Claude Code to search your past conversations using natural language queries.
+[![GitHub stars](https://img.shields.io/github/stars/danwt/claude-memory-skill?style=flat-square)](https://github.com/danwt/claude-memory-skill/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/danwt/claude-memory-skill?style=flat-square)](https://github.com/danwt/claude-memory-skill/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/danwt/claude-memory-skill?style=flat-square)](https://github.com/danwt/claude-memory-skill/issues)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![Docker](https://img.shields.io/badge/Docker-ready-blue?style=flat-square&logo=docker)](https://www.docker.com/)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-skill-blueviolet?style=flat-square)](https://claude.ai/claude-code)
+[![Python](https://img.shields.io/badge/Python-3.12-green?style=flat-square&logo=python)](https://www.python.org/)
+
+> Give Claude Code persistent memory across sessions with natural language search
+
+A self-hosted Docker service that indexes your Claude Code conversation history and makes it searchable using natural language. Uses hybrid search (FTS5 + vector embeddings) with an agentic LLM layer that understands your queries and returns relevant excerpts from past conversations.
+
+## Features
+
+- **Natural language search** - Ask questions like "what did we discuss about auth last week?"
+- **Hybrid retrieval** - Combines keyword (BM25) and semantic (vector) search with RRF fusion
+- **Agentic query planning** - Cheap LLM interprets your query and runs optimal searches
+- **Auto-ingestion** - Automatically indexes `~/.claude/projects` on startup
+- **Cost-efficient** - Uses Gemini Flash Lite (~$0.002 per search) via OpenRouter
+- **Fully local** - Your conversations never leave your machine (except LLM calls)
+
+## Quick Start
+
+```bash
+# Clone
+git clone https://github.com/danwt/claude-memory-skill.git
+cd claude-memory-skill
+
+# Configure
+cp .env.example .env
+# Edit .env and add your OpenRouter API key
+
+# Start
+docker compose up -d
+
+# Verify
+curl http://localhost:8002/health
+```
 
 ## Architecture
 
 ```
-Claude (Opus)
-    │
-    │  POST /search {"query": "natural language question"}
-    │
-    ▼
-┌─────────────────────────────────────────────────────┐
-│  Memory Service (Docker)                            │
-│                                                     │
-│  1. Cheap LLM parses query → search plan           │
-│  2. Hybrid search (FTS5 + vector)                  │
-│  3. RRF fusion combines results                    │
-│  4. LLM formats response                           │
-│                                                     │
-│  SQLite (FTS5 + sqlite-vec)                        │
-│  └── ~/.claude/projects/*.jsonl                    │
-└─────────────────────────────────────────────────────┘
-    │
-    │  {"result": "On Jan 10, you discussed..."}
-    │
-    ▼
-Claude (Opus)
+┌─────────────────────────────────────────────────────────┐
+│                     Claude Code                         │
+│                          │                              │
+│                     /memory skill                       │
+│                          │                              │
+│                       curl/bash                         │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│              Memory Service (port 8002)                  │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │              Agentic Search Layer                  │  │
+│  │                                                    │  │
+│  │  1. Parse natural language query                  │  │
+│  │  2. Generate FTS5 + vector search strategies      │  │
+│  │  3. Execute searches, evaluate results            │  │
+│  │  4. Format helpful response                       │  │
+│  │                     (Gemini Flash Lite)           │  │
+│  └────────────────────────────────────────────────────┘  │
+│                          │                               │
+│                          ▼                               │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │           SQLite + FTS5 + sqlite-vec              │  │
+│  │                                                    │  │
+│  │  • Full-text index (BM25 ranking)                 │  │
+│  │  • Vector index (384-dim embeddings)              │  │
+│  │  • RRF fusion for hybrid results                  │  │
+│  └────────────────────────────────────────────────────┘  │
+│                          │                               │
+│                          ▼                               │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │              ~/.claude/projects                    │  │
+│  │                                                    │  │
+│  │  Your conversation archives (JSONL)               │  │
+│  └────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+## Usage
 
-1. **Configure environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env and add your OpenRouter API key
-   ```
-
-2. **Start the service**
-   ```bash
-   docker compose up -d
-   ```
-
-3. **Install the skill** (copy to your Claude skills directory)
-   ```bash
-   cp skill/SKILL.md ~/.claude/skills/memory.md
-   ```
-
-4. **Use it**
-   ```bash
-   curl -s -X POST http://localhost:8002/search \
-     -H "Content-Type: application/json" \
-     -d '{"query": "what did I discuss about authentication last week"}'
-   ```
-
-## Configuration
-
-| Environment Variable | Description | Default |
-|---------------------|-------------|---------|
-| `OPENROUTER_API_KEY` | Your OpenRouter API key | (required) |
-| `OPENROUTER_MODEL` | LLM model for query processing | `google/gemini-2.0-flash-lite-001` |
-
-The service automatically mounts `~/.claude/projects` to read conversation archives.
-
-## API
-
-### POST /search
-
-Search your conversation history.
+Just ask Claude to search your memory:
 
 ```bash
 curl -X POST http://localhost:8002/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "your natural language question"}'
+  -d '{"query": "how did we fix the authentication bug in cosmos-sdk?"}'
 ```
 
-Response:
-```json
-{
-  "result": "Formatted response with relevant conversation excerpts..."
-}
-```
+Example queries:
+- "what did I work on yesterday?"
+- "find discussions about database migrations"
+- "how did we implement the rate limiter?"
+- "what was the solution for the Docker networking issue?"
 
-### GET /stats
+## Configuration
 
-Get database statistics.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENROUTER_API_KEY` | Your OpenRouter API key | (required) |
+| `OPENROUTER_MODEL` | LLM for query processing | `google/gemini-2.0-flash-lite-001` |
 
-```bash
-curl http://localhost:8002/stats
-```
+## API Reference
 
-Response:
-```json
-{
-  "total_messages": 1234,
-  "sessions": 56,
-  "projects": 7
-}
-```
-
-### POST /ingest
-
-Trigger re-indexing of conversation archives.
-
-```bash
-curl -X POST http://localhost:8002/ingest
-```
-
-### GET /health
-
-Health check endpoint.
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/search` | POST | Search conversations with `{"query": "..."}` |
+| `/stats` | GET | Database statistics (messages, sessions, projects) |
+| `/ingest` | POST | Trigger re-indexing of archives |
+| `/health` | GET | Health check |
 
 ## How It Works
 
-1. **Ingest**: On startup (and via `/ingest`), the service scans `~/.claude/projects` for JSONL conversation files and indexes them:
-   - Full-text index (SQLite FTS5) for keyword search
-   - Vector index (sqlite-vec) for semantic search
+1. **Ingest** - On startup, scans `~/.claude/projects/*.jsonl` and builds:
+   - SQLite FTS5 index for keyword/phrase search
+   - sqlite-vec index with sentence-transformer embeddings
 
-2. **Search**: When you query:
-   - A cheap LLM (via OpenRouter) analyzes your query and generates search strategies
-   - Hybrid search runs both FTS5 and vector queries
-   - Results are combined using Reciprocal Rank Fusion (RRF)
-   - The LLM formats a helpful response with relevant excerpts
+2. **Search** - When you query:
+   - Cheap LLM analyzes your question and generates search strategies
+   - Runs parallel FTS5 (keyword) and vector (semantic) searches
+   - Combines results using Reciprocal Rank Fusion (RRF)
+   - LLM formats a helpful response with relevant excerpts
 
-3. **Cost**: Uses `gemini-2.0-flash-lite` (~$0.002 per search) for query processing and response formatting.
+3. **Cost** - ~$0.002 per search (2 LLM calls via Gemini Flash Lite)
 
 ## Data Storage
 
-- **Database**: `/app/data/memory.db` (persisted via Docker volume)
-- **Embedding model**: Cached in `/app/models` (persisted via Docker volume)
-- **Conversation archives**: Mounted read-only from `~/.claude/projects`
+| Path | Description |
+|------|-------------|
+| `memory-data` volume | SQLite database |
+| `embedding-models` volume | Cached sentence-transformers model (~90MB) |
+| `~/.claude/projects` | Your conversation archives (read-only mount) |
 
 ## Troubleshooting
 
-**Service won't start**
+<details>
+<summary><b>Service won't start</b></summary>
+
 ```bash
 docker compose logs memory
 ```
+</details>
 
-**No results found**
-- Check if archives exist: `ls ~/.claude/projects`
+<details>
+<summary><b>No results found</b></summary>
+
+- Check archives exist: `ls ~/.claude/projects`
 - Trigger re-ingest: `curl -X POST http://localhost:8002/ingest`
 - Check stats: `curl http://localhost:8002/stats`
+</details>
 
-**Slow first query**
-- The embedding model (~90MB) downloads on first use
-- Subsequent queries are fast (~500ms)
+<details>
+<summary><b>Slow first query</b></summary>
+
+The embedding model (~90MB) downloads on first use. Subsequent queries are fast (~500ms).
+</details>
+
+## Related Projects
+
+- [claude-search-skill](https://github.com/danwt/claude-search-skill) - Web search and scraping for Claude Code
 
 ## License
 
