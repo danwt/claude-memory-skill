@@ -1,22 +1,28 @@
-# Memory Search Skill
+---
+name: memory
+description: Search past Claude conversations using natural language queries via local memory service
+---
+
+# Memory Search
 
 Search your past Claude conversations using natural language.
 
 ## Prerequisites
 
-The memory service must be running on localhost:8002. Start it with:
+Docker service must be running from `~/Documents/repos/sketch-claude-memory-skill`:
+
 ```bash
-cd ~/path/to/claude-memory-skill && docker compose up -d
+cd ~/Documents/repos/sketch-claude-memory-skill && docker compose up -d
 ```
 
-## Usage
+Service: http://localhost:8002
 
-When you need to recall something from a previous conversation, search your memory:
+## Search Your Conversations
 
 ```bash
 curl -s -X POST http://localhost:8002/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "YOUR NATURAL LANGUAGE QUERY HERE"}'
+  -d '{"query": "YOUR NATURAL LANGUAGE QUERY"}'
 ```
 
 The service will:
@@ -25,50 +31,59 @@ The service will:
 3. Combine results using reciprocal rank fusion
 4. Return a formatted response with relevant conversation excerpts
 
-## Examples
+### Search Examples
 
-Find discussions about a topic:
 ```bash
+# Find discussions about a topic
 curl -s -X POST http://localhost:8002/search \
   -H "Content-Type: application/json" \
   -d '{"query": "what did we discuss about cosmos-sdk authentication"}'
-```
 
-Recall recent work:
-```bash
+# Recall recent work
 curl -s -X POST http://localhost:8002/search \
   -H "Content-Type: application/json" \
   -d '{"query": "what was I working on in dymension-rdk last week"}'
-```
 
-Find error solutions:
-```bash
+# Find error solutions
 curl -s -X POST http://localhost:8002/search \
   -H "Content-Type: application/json" \
   -d '{"query": "how did we fix the signature verification bug"}'
+
+# General recall
+curl -s -X POST http://localhost:8002/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "what projects have I been working on recently"}'
 ```
 
 ## Other Endpoints
 
-Check service health:
 ```bash
+# Health check
 curl -s http://localhost:8002/health
-```
 
-Get database stats:
-```bash
+# Database stats
 curl -s http://localhost:8002/stats
-```
 
-Trigger re-ingest of conversation archives:
-```bash
+# Re-index conversation archives
 curl -s -X POST http://localhost:8002/ingest
 ```
 
-## When to Use
+## Troubleshooting
 
-Use this skill when:
-- You need to recall something discussed in a previous session
-- You want to find how a problem was solved before
-- You're looking for context from past work on a project
-- You need to reference previous decisions or implementations
+```bash
+# Check container status
+docker ps | grep memory
+
+# Restart service
+cd ~/Documents/repos/sketch-claude-memory-skill && docker compose restart
+
+# View logs
+docker compose -f ~/Documents/repos/sketch-claude-memory-skill/docker-compose.yml logs -f memory
+```
+
+## When to Use This
+
+- Recalling something discussed in a previous session
+- Finding how a problem was solved before
+- Looking for context from past work on a project
+- Referencing previous decisions or implementations
